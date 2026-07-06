@@ -1,0 +1,73 @@
+// filename: Assets/Scripts/XMProtocol.cs
+using MessagePack;
+
+namespace XMflight
+{
+    public static class XMProtocol {
+        public const int SchemaVersion = 2;
+        public const int ModeVelocity = 0;
+        public const int ModeTeleport = 1;
+        public const int ModeStep = 2;
+        // External trajectory tracking mode. The trajectory/motion primitive is generated outside Unity.
+        // action = [vx_body, vy_body, vz_body, yaw_rate_rad_s], position = optional ROS-frame reference position.
+        public const int ModeTrajectory = 3;
+
+        public const int DepthEncoding16UC1 = 1;
+        public const int ByteOrderLittleEndian = 0;
+        public const int FlagCollision = 1 << 0;
+        public const int FlagAltitudeViolation = 1 << 1;
+
+        public const int DynamicsStateFieldCount = 10;
+        public const int DepthFrameFieldCount = 13;
+        public const int CommandFieldCount = 6;
+        public const int CameraFieldCount = 8;
+        public const int DepthMetaFieldCount = 5;
+
+        public static class DynamicsStateIndex {
+            public const int SchemaVersion = 0;
+            public const int StateId = 1;
+            public const int SimTimeNs = 2;
+            public const int Flags = 3;
+            public const int MinClearance = 4;
+            public const int CurrPos = 5;
+            public const int CurrRot = 6;
+            public const int CurrVel = 7;
+            public const int CurrAcc = 8;
+            public const int FrontClearances = 9;
+        }
+
+        public static class DepthFrameIndex {
+            public const int SchemaVersion = 0;
+            public const int CaptureId = 1;
+            public const int SimTimeNs = 2;
+            public const int Flags = 3;
+            public const int CapturePos = 4;
+            public const int CaptureRot = 5;
+            public const int CaptureVel = 6;
+            public const int CaptureAcc = 7;
+            public const int CaptureForward = 8;
+            public const int Camera = 9;
+            public const int DepthMeta = 10;
+            public const int MinClearance = 11;
+            public const int FrontClearances = 12;
+        }
+
+        public static class CommandIndex {
+            public const int SchemaVersion = 0;
+            public const int Mode = 1;
+            public const int Action = 2;
+            public const int Position = 3;
+            public const int ClientTimeNs = 4;
+            public const int CommandId = 5;
+        }
+    }
+
+    public sealed class ControlCommandMsg {
+        public int schema_version;
+        public int mode;
+        public float[] action;
+        public float[] position;
+        public long client_time_ns;
+        public long command_id;
+    }
+}

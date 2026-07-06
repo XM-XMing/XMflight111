@@ -1,0 +1,73 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 5c2ba79ba3fd76d7aac4671dfcfdde58, type: 3}
+  m_Name: XMFlightConfig
+  m_EditorClassIdentifier: 
+  commandSubPort: 10253
+  statePubPort: 10254
+  depthPubPort: 11254
+  recvHighWatermark: 2
+  sendHighWatermark: 2
+  simulationSpeed: 1
+  fixedDeltaTime: 0.02
+  isRlTrainingMode: 0
+  timeConstantXY: 0.06
+  timeConstantZ: 0.06
+  obsNoiseStdDev: 0
+  posNoiseStdDev: 0
+  ctrlLatencyFrames: 0
+  maxSpeed: 5
+  maxAngularRateDeg: 120
+  accFilterTime: 0.15
+  maxTiltAngleDeg: 15
+  attitudeFilterTime: 0.3
+  maxTiltRateDeg: 70
+  visualTiltScale: 0.65
+  stepPosKp: 3
+  stepPosErrClamp: 1
+  zeroCommandOnTimeout: 1
+  commandTimeoutSec: 0.25
+  enableAltitudeViolationFlag: 1
+  minFlightHeight: 1
+  maxFlightHeight: 3
+  altitudeViolationMargin: 0
+  stopOnCollision: 1
+  droneRadius: 0.2
+  collisionRayMaxRange: 5
+  obstacleMask:
+    serializedVersion: 2
+    m_Bits: 8
+  maxRayCount: 1536
+  mediumRayCount: 768
+  lowRayCount: 384
+  frontRayRatio: 0.65
+  frontConeHalfAngleDeg: 40
+  highRiskClearance: 0.8
+  mediumRiskClearance: 2
+  highRiskSpeed: 2.2
+  mediumRiskSpeed: 1.2
+  highRiskInterval: 1
+  mediumRiskInterval: 2
+  lowRiskInterval: 5
+  targetHFovDeg: 87
+  targetVFovDeg: 58
+  minDepthRange: 0.3
+  maxDepthRange: 3
+  outputWidth: 848
+  outputHeight: 480
+  cameraOffset: {x: 0, y: 0, z: 0}
+  cameraEuler: {x: 0, y: 0, z: 0}
+  showDepthInGameView: 1
+  enableDepthNoise: 0
+  baseDepthNoiseStd: 0.002
+  depthNoiseQuadraticK: 0.0015
+  randomDropoutProb: 0

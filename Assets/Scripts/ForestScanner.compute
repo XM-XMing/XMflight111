@@ -1,0 +1,88 @@
+// filename: Assets/Scripts/Other/ForestScanner.compute
+#pragma kernel CSMain
+
+StructuredBuffer<float3> _Vertices;
+StructuredBuffer<int> _Indices;
+StructuredBuffer<float4x4> _Matrices;
+
+StructuredBuffer<float> _GroundHeights;
+
+AppendStructuredBuffer<float3> _ResultPoints;
+
+float _Density;
+float _Seed;
+uint _IndicesCount;
+
+int _EnableHeightFilter;
+float _MinHeightAboveGround;
+float _MaxHeightAboveGround;
+
+float rand(float3 co)
+{
+    return frac(sin(dot(co.xyz, float3(12.9898, 78.233, 53.539))) * 43758.5453);
+}
+
+[numthreads(64, 1, 1)]
+void CSMain(uint3 id : SV_DispatchThreadID)
+{
+    uint triangleIndex = id.x;
+    uint matrixIndex = id.y;
+
+    if (triangleIndex * 3 >= _IndicesCount)
+        return;
+
+    int idx1 = _Indices[triangleIndex * 3];
+    int idx2 = _Indices[triangleIndex * 3 + 1];
+    int idx3 = _Indices[triangleIndex * 3 + 2];
+
+    float3 v1 = _Vertices[idx1];
+    float3 v2 = _Vertices[idx2];
+    float3 v3 = _Vertices[idx3];
+
+    float4x4 mat = _Matrices[matrixIndex];
+    float groundY = _GroundHeights[matrixIndex];
+
+    float3 scale = float3(
+        length(float3(mat[0][0], mat[0][1], mat[0][2])),
+        length(float3(mat[1][0], mat[1][1], mat[1][2])),
+        length(float3(mat[2][0], mat[2][1], mat[2][2]))
+    );
+
+    float scaleFactor = scale.x * scale.z;
+
+    float3 side1 = v2 - v1;
+    float3 side2 = v3 - v1;
+    float area = length(cross(side1, side2)) * 0.5;
+
+    float countFloat = area * scaleFactor * _Density;
+    countFloat = min(countFloat, 200.0);
+
+    int count = (int)countFloat;
+    if (rand(float3(triangleIndex, matrixIndex, _Seed)) < (countFloat - count))
+        count++;
+
+    for (int k = 0; k < count; k++) {
+        float r1 = rand(float3(k, triangleIndex, matrixIndex + _Seed));
+        float r2 = rand(float3(matrixIndex, k, triangleIndex + _Seed));
+
+        float sqrtR1 = sqrt(r1);
+        float u = 1.0 - sqrtR1;
+        float v = sqrtR1 * (1.0 - r2);
+        float w = sqrtR1 * r2;
+
+        float3 localPt = v1 * u + v2 * v + v3 * w;
+        float3 worldPt = mul(mat, float4(localPt, 1.0)).xyz;
+
+        float heightAboveGround = worldPt.y - groundY;
+
+        if (_EnableHeightFilter != 0) {
+            if (heightAboveGround < _MinHeightAboveGround ||
+                heightAboveGround > _MaxHeightAboveGround)
+            {
+                continue;
+            }
+        }
+
+        _ResultPoints.Append(worldPt);
+    }
+}
