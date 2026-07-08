@@ -74,7 +74,7 @@ namespace XMflight
         public float targetHFovDeg = 87.0f;
         public float targetVFovDeg = 58.0f;
         public float minDepthRange = 0.3f;
-        public float maxDepthRange = 3.0f;
+        public float maxDepthRange = 6.0f;
         public int outputWidth = 848;
         public int outputHeight = 480;
 

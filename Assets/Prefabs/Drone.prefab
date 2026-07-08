@@ -390,7 +390,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   _targetHFov: 87
   _targetVFov: 58
-  _maxDepthRange: 3
+  _maxDepthRange: 6
   _minDepthRange: 0.3
   _outputWidth: 848
   _outputHeight: 480

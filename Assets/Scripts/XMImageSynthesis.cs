@@ -11,7 +11,7 @@ namespace XMflight
         [Header("D435i Simulation")]
         [SerializeField] private float _targetHFov = 87.0f;
         [SerializeField] private float _targetVFov = 58.0f;
-        [SerializeField] private float _maxDepthRange = 3.0f;
+        [SerializeField] private float _maxDepthRange = 6.0f;
         [SerializeField] private float _minDepthRange = 0.3f;
         [SerializeField] private int _outputWidth = 848;
         [SerializeField] private int _outputHeight = 480;

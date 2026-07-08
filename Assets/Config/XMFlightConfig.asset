@@ -61,7 +61,7 @@ MonoBehaviour:
   targetHFovDeg: 87
   targetVFovDeg: 58
   minDepthRange: 0.3
-  maxDepthRange: 3
+  maxDepthRange: 6
   outputWidth: 848
   outputHeight: 480
   cameraOffset: {x: 0, y: 0, z: 0}
