@@ -486,7 +486,11 @@ namespace XMflight
 
             if (GUILayout.Button("Start Scan", GUILayout.Height(28)))
             {
-                scanner.StartScan();
+                EditorApplication.delayCall += () =>
+                {
+                    if (scanner != null)
+                        scanner.StartScan();
+                };
             }
         }
     }

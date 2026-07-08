@@ -113,54 +113,57 @@ namespace XMflight
             EditorUtility.DisplayProgressBar("生成森林", "种植中...", 0f);
 #endif
 
-            while (placed < targetTreeCount && attempts < maxAttempts) {
-                attempts++;
+            try {
+                while (placed < targetTreeCount && attempts < maxAttempts) {
+                    attempts++;
 
-                float x = UnityEngine.Random.Range(minX, maxX);
-                float z = UnityEngine.Random.Range(minZ, maxZ);
-                var candidate = new Vector2(x, z);
+                    float x = UnityEngine.Random.Range(minX, maxX);
+                    float z = UnityEngine.Random.Range(minZ, maxZ);
+                    var candidate = new Vector2(x, z);
 
-                if (IsInsideClearZone(
-                    candidate,
-                    minX,
-                    maxX,
-                    minZ,
-                    maxZ,
-                    squareClearRadius,
-                    corridorEndpointClearRadius))
-                    continue;
+                    if (IsInsideClearZone(
+                        candidate,
+                        minX,
+                        maxX,
+                        minZ,
+                        maxZ,
+                        squareClearRadius,
+                        corridorEndpointClearRadius))
+                        continue;
 
-                if (!PassDistributionFilter(
-                    candidate,
-                    noiseOffset,
-                    spatialGrid,
-                    effectiveMinTreeDistance,
-                    minX,
-                    minZ))
-                    continue;
+                    if (!PassDistributionFilter(
+                        candidate,
+                        noiseOffset,
+                        spatialGrid,
+                        effectiveMinTreeDistance,
+                        minX,
+                        minZ))
+                        continue;
 
-                float y = _targetTerrain != null
-                    ? _targetTerrain.SampleHeight(new Vector3(x, 0, z)) + _targetTerrain.transform.position.y
-                    : 0f;
+                    float y = _targetTerrain != null
+                        ? _targetTerrain.SampleHeight(new Vector3(x, 0, z)) + _targetTerrain.transform.position.y
+                        : 0f;
 
-                if (!PlaceTree(new Vector3(x, y, z), obstacleLayer))
-                    continue;
+                    if (!PlaceTree(new Vector3(x, y, z), obstacleLayer))
+                        continue;
 
-                spatialGrid.Insert(candidate);
-                placed++;
+                    spatialGrid.Insert(candidate);
+                    placed++;
 
 #if UNITY_EDITOR
-                if (attempts % 500 == 0 && targetTreeCount > 0)
-                    EditorUtility.DisplayProgressBar(
-                        "生成森林",
-                        $"已种 {placed}/{targetTreeCount}...",
-                        (float)placed / targetTreeCount);
+                    if (attempts % 500 == 0 && targetTreeCount > 0)
+                        EditorUtility.DisplayProgressBar(
+                            "生成森林",
+                            $"已种 {placed}/{targetTreeCount}...",
+                            (float)placed / targetTreeCount);
+#endif
+                }
+            }
+            finally {
+#if UNITY_EDITOR
+                EditorUtility.ClearProgressBar();
 #endif
             }
-
-#if UNITY_EDITOR
-            EditorUtility.ClearProgressBar();
-#endif
 
             Debug.Log(
                 $"[ForestGenerator] 模式: {_mapMode}, 范围 X[{minX}, {maxX}] Z[{minZ}, {maxZ}], " +
@@ -441,58 +444,64 @@ namespace XMflight
             var sw = System.Diagnostics.Stopwatch.StartNew();
             long totalWritten = 0;
 
-            using (var fs = new FileStream(path, FileMode.Create))
-            using (var bw = new BinaryWriter(fs)) {
-                bw.Write((int)0);
+            try {
+                using (var fs = new FileStream(path, FileMode.Create))
+                using (var bw = new BinaryWriter(fs)) {
+                    bw.Write((int)0);
 
-                var groups = _forestParent.GetComponentsInChildren<MeshCollider>()
-                    .Where(mc => mc.sharedMesh != null)
-                    .GroupBy(mc => mc.sharedMesh)
-                    .ToList();
+                    var groups = _forestParent.GetComponentsInChildren<MeshCollider>()
+                        .Where(mc => mc.sharedMesh != null)
+                        .GroupBy(mc => mc.sharedMesh)
+                        .ToList();
 
-                if (groups.Count == 0)
-                    Debug.LogWarning("[ForestGenerator] 未找到可扫描的 MeshCollider，输出点云为空");
+                    if (groups.Count == 0)
+                        Debug.LogWarning("[ForestGenerator] 未找到可扫描的 MeshCollider，输出点云为空");
 
-                for (int g = 0; g < groups.Count; g++) {
-                    Mesh mesh = groups[g].Key;
+                    for (int g = 0; g < groups.Count; g++) {
+                        Mesh mesh = groups[g].Key;
 
 #if UNITY_EDITOR
-                    EditorUtility.DisplayProgressBar("扫描点云", $"网格 {g + 1}/{groups.Count}: {mesh.name}", (float)g / groups.Count);
+                        EditorUtility.DisplayProgressBar("扫描点云", $"网格 {g + 1}/{groups.Count}: {mesh.name}", (float)g / groups.Count);
 #endif
 
-                    Vector3[] template = GetOrCreateTemplate(mesh);
-                    if (template.Length == 0)
-                        continue;
+                        Vector3[] template = GetOrCreateTemplate(mesh);
+                        if (template.Length == 0)
+                            continue;
 
-                    Matrix4x4[] matrices = groups[g]
-                        .Select(mc => mc.transform.localToWorldMatrix)
-                        .ToArray();
+                        Matrix4x4[] matrices = groups[g]
+                            .Select(mc => mc.transform.localToWorldMatrix)
+                            .ToArray();
 
-                    totalWritten += TransformAndWrite(bw, template, matrices);
+                        totalWritten += TransformAndWrite(bw, template, matrices);
+                    }
+
+                    bw.Flush();
+                    const long bytesPerPoint = sizeof(float) * 3L;
+                    long payloadBytes = fs.Length - sizeof(int);
+                    if (payloadBytes < 0 || payloadBytes % bytesPerPoint != 0)
+                        throw new InvalidDataException(
+                            $"Invalid point cloud payload length: fileBytes={fs.Length}, payloadBytes={payloadBytes}");
+
+                    long actualWritten = payloadBytes / bytesPerPoint;
+                    if (actualWritten != totalWritten)
+                        throw new InvalidDataException(
+                            $"Point count mismatch while writing: counted={totalWritten}, actual={actualWritten}");
+                    if (actualWritten > int.MaxValue)
+                        throw new InvalidDataException(
+                            $"Point count exceeds int32 header capacity: {actualWritten}");
+
+                    fs.Seek(0, SeekOrigin.Begin);
+                    bw.Write((int)actualWritten);
+                    bw.Flush();
                 }
-
-                bw.Flush();
-                const long bytesPerPoint = sizeof(float) * 3L;
-                long payloadBytes = fs.Length - sizeof(int);
-                if (payloadBytes < 0 || payloadBytes % bytesPerPoint != 0)
-                    throw new InvalidDataException(
-                        $"Invalid point cloud payload length: fileBytes={fs.Length}, payloadBytes={payloadBytes}");
-
-                long actualWritten = payloadBytes / bytesPerPoint;
-                if (actualWritten != totalWritten)
-                    throw new InvalidDataException(
-                        $"Point count mismatch while writing: counted={totalWritten}, actual={actualWritten}");
-                if (actualWritten > int.MaxValue)
-                    throw new InvalidDataException(
-                        $"Point count exceeds int32 header capacity: {actualWritten}");
-
-                fs.Seek(0, SeekOrigin.Begin);
-                bw.Write((int)actualWritten);
-                bw.Flush();
+            }
+            finally {
+#if UNITY_EDITOR
+                EditorUtility.ClearProgressBar();
+#endif
             }
 
 #if UNITY_EDITOR
-            EditorUtility.ClearProgressBar();
             AssetDatabase.Refresh();
 #endif
 
@@ -893,25 +902,38 @@ namespace XMflight
             EditorGUILayout.Space(10f);
 
             if (GUILayout.Button("Generate Forest", GUILayout.Height(28f))) {
-                foreach (UnityEngine.Object item in targets) {
-                    var generator = (ForestGenerator)item;
+                RunAfterGui(targets, generator => {
                     generator.GenerateForest();
                     EditorUtility.SetDirty(generator);
-                }
+                });
             }
 
             using (new EditorGUILayout.HorizontalScope()) {
                 if (GUILayout.Button("Scan Mesh Collider")) {
-                    foreach (UnityEngine.Object item in targets)
-                        ((ForestGenerator)item).ScanCollidersDirectly();
+                    RunAfterGui(targets, generator => generator.ScanCollidersDirectly());
                 }
 
 
                 if (GUILayout.Button("Clear Forest")) {
-                    foreach (UnityEngine.Object item in targets)
-                        ((ForestGenerator)item).ClearForest();
+                    RunAfterGui(targets, generator => generator.ClearForest());
                 }
             }
+        }
+
+        private static void RunAfterGui(UnityEngine.Object[] selectedTargets, Action<ForestGenerator> action) {
+            var generators = selectedTargets
+                .OfType<ForestGenerator>()
+                .Where(generator => generator != null)
+                .ToArray();
+
+            EditorApplication.delayCall += () => {
+                foreach (ForestGenerator generator in generators) {
+                    if (generator == null)
+                        continue;
+
+                    action(generator);
+                }
+            };
         }
 
         private static void DrawSection(string title) {
