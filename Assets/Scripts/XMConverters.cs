@@ -6,7 +6,6 @@ using UnityEngine;
 namespace XMflight
 {
     public static class XMConverters {
-
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static Vector3 RosToUnityPos(IList<float> l)
             => new Vector3(-l[1], l[2], l[0]);

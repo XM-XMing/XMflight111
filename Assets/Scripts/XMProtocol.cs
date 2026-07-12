@@ -8,8 +8,6 @@ namespace XMflight
         public const int ModeVelocity = 0;
         public const int ModeTeleport = 1;
         public const int ModeStep = 2;
-        // External trajectory tracking mode. The trajectory/motion primitive is generated outside Unity.
-        // action = [vx_body, vy_body, vz_body, yaw_rate_rad_s], position = optional ROS-frame reference position.
         public const int ModeTrajectory = 3;
 
         public const int DepthEncoding16UC1 = 1;

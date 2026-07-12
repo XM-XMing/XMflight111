@@ -455,7 +455,7 @@ namespace XMflight
                         .ToList();
 
                     if (groups.Count == 0)
-                        Debug.LogWarning("[ForestGenerator] 未找到可扫描的 MeshCollider，输出点云为空");
+                        Debug.LogWarning("[ForestGenerator] 未找到可扫描的 MeshCollider, 输出点云为空");
 
                     for (int g = 0; g < groups.Count; g++) {
                         Mesh mesh = groups[g].Key;

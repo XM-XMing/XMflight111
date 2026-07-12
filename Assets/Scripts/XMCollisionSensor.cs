@@ -220,9 +220,6 @@ namespace XMflight
 
                 Vector3 localDir = _rayDirs[i];
 
-                // MinClearance is a full-sphere metric used by privileged
-                // evaluation/reward. Only the three directional buckets are
-                // front-facing.
                 if (localDir.z < 0.1f)
                     continue;
 

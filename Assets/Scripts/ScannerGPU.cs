@@ -31,13 +31,13 @@ namespace XMflight
         [Header("Scan Mode")]
         public ScanMode scanMode = ScanMode.FullScan;
 
-        [Tooltip("最低离地高度，单位：米。仅 HeightRange 模式使用。")]
+        [Tooltip("最低离地高度，单位：米。仅 HeightRange 模式使用")]
         public float minHeightAboveGround = 0f;
 
-        [Tooltip("最高离地高度，单位：米。仅 HeightRange 模式使用。")]
+        [Tooltip("最高离地高度，单位：米。仅 HeightRange 模式使用")]
         public float maxHeightAboveGround = 6f;
 
-        [Tooltip("树根节点 Y 与实际地面不一致时使用。仅 HeightRange 模式使用。")]
+        [Tooltip("树根节点 Y 与实际地面不一致时使用。仅 HeightRange 模式使用")]
         public float groundHeightOffset = 0f;
 
         private const int MAX_POINTS_PER_BATCH = 20000000;
