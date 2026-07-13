@@ -1,6 +1,6 @@
-# XMflight--面向森林环境无人机自主飞行的 Unity 仿真平台
+# XMflight：面向森林环境无人机自主飞行的 Unity 仿真平台
 
-XMflight 基于 Unity 的无人机森林环境仿真工程，面向路径规划、避障控制、强化学习和深度视觉感知算法验证。工程在 Unity 端构建树木障碍物场景，模拟无人机位姿演化、碰撞检测、前向安全距离感知和 D435i 风格深度图采集，并通过 ZMQ + MessagePack 与外部 ROS/Python 客户端交换控制指令、状态帧和深度帧。
+XMflight 是基于 Unity 的无人机森林环境仿真工程，面向路径规划、避障控制、强化学习和深度视觉感知算法验证。工程在 Unity 端构建树木障碍物场景，模拟无人机位姿演化、碰撞检测、前向安全距离感知和 D435i 风格深度图采集，并通过 ZMQ + MessagePack 与外部 ROS/Python 客户端交换控制指令、状态帧和深度帧。
 
 ---
 
@@ -12,7 +12,7 @@ XMflight 基于 Unity 的无人机森林环境仿真工程，面向路径规划�
 | 研究对象 | 森林障碍物场景下的无人机自主飞行 |
 | 外部接口 | ZMQ + MessagePack |
 | 外部客户端 | ROS 节点、Python 脚本、强化学习训练进程 |
-| 控制输入 | 速度控制、位置重置、Step 模式速度控制与目标修正 |
+| 控制输入 | 速度控制、位置重置、Step/Trajectory 模式速度控制与目标修正 |
 | 感知输出 | 碰撞状态、安全距离、D435i 风格 16UC1 深度图 |
 | 主要用途 | 规划算法验证、避障策略验证、深度感知算法测试、RL 环境交互 |
 
@@ -28,8 +28,8 @@ XMflight 基于 Unity 的无人机森林环境仿真工程，面向路径规划�
 | 主场景 | `Assets/Scenes/Forest.unity` |
 | 启用构建场景数 | 1 |
 | 自定义 `.cs` 文件 | 11 个 |
-| 自定义 `.cs` 代码量 | 3337 行 |
-| ComputeShader 文件 | 1 个，88 行 |
+| 自定义 `.cs` 代码量 | 3292 行 |
+| ComputeShader 文件 | 1 个，87 行 |
 | 第三方 MessagePack 源码 | 104 个文件 |
 | 插件 DLL | 4 个 |
 | 树木 Prefab 类型 | 17 类，`T01`~`T17` |
@@ -38,10 +38,10 @@ XMflight 基于 Unity 的无人机森林环境仿真工程，面向路径规划�
 | 默认物理步长 | `0.02 s` |
 | 默认状态频率 | `1 / 0.02 = 50 Hz`，当 `publishStride=1` |
 | 默认目标渲染帧率 | `Application.targetFrameRate≈50` |
-| 默认深度图分辨率 | `640 × 480` |
+| 默认深度图分辨率 | `848 × 480` |
 | 默认深度图编码 | `16UC1`，小端序 |
-| 默认深度 payload | `640 × 480 × 2 = 614400 bytes/frame` |
-| 深度 payload 带宽估计 | `614400 × depth_fps` bytes/s；当 `depth_fps=50` 时约 `29.30 MiB/s` |
+| 默认深度 payload | `848 × 480 × 2 = 814080 bytes/frame` |
+| 深度 payload 带宽估计 | `814080 × depth_fps` bytes/s；当 `depth_fps=50` 时约 `38.82 MiB/s` |
 
 状态帧和深度帧不是同一个调度源。状态帧由 `FixedUpdate()` 驱动，深度帧由相机渲染和 GPU 读回驱动。因此，二者默认配置下目标频率接近，但实际运行时不必严格相同。
 
@@ -51,7 +51,7 @@ XMflight 基于 Unity 的无人机森林环境仿真工程，面向路径规划�
 
 ### 3.1 通信与仿真流程
 
-![](/home/xm/XM/XMflight/xmflight_sim_flow.png)
+![XMflight_sim_flow](/home/xm/XM/XMflight/XMflight_sim_flow.png)
 
 图中包含 3 条关键链路：
 
@@ -59,7 +59,7 @@ XMflight 基于 Unity 的无人机森林环境仿真工程，面向路径规划�
 |---|---|---|---:|
 | 控制指令 | 外部 ROS/Python → `XMSimulationManager.PollCommands()` | 客户端到 Unity | `10253` |
 | 状态帧 | `XMSimulationManager.FixedUpdate()` → `PublishDynamicsState()` | Unity 到客户端 | `10254` |
-| 深度帧 | `XMImageSynthesis.OnRenderImage()` → `AsyncGPUReadback` → `PublishDepthFrame()` | Unity 到客户端 | `11254` |
+| 深度帧 | `XMImageSynthesis.OnRenderImage()` → `AsyncGPUReadback` → `XMSimulationManager.OnFrameReady()` | Unity 到客户端 | `11254` |
 
 ### 3.2 运行时模块分工
 
@@ -84,7 +84,7 @@ XMflight 基于 Unity 的无人机森林环境仿真工程，面向路径规划�
 ```text
 XMflight/
 ├── Assets/
-│   ├── Config/                           # 当前文件夹右键─>Creat─>XMflight─>Config生成*.asset 文件
+│   ├── Config/                           # 右键 → Create → XMflight → Config 生成 .asset 文件
 │   │   └── XMFlightConfig.asset          # 统一仿真参数配置
 │   ├── Materials/
 │   │   ├── Drone.fbx
@@ -92,7 +92,7 @@ XMflight/
 │   ├── Plugins/
 │   │   ├── Microsoft.NET.StringTools.dll
 │   │   ├── System.Runtime.CompilerServices.Unsafe.dll
-│   │   └── Zmq/AsyncIO.dll, NetMQ.dll
+│   │   └── ZMQ/AsyncIO.dll, NetMQ.dll
 │   ├── Prefabs/
 │   │   ├── Drone.prefab
 │   │   └── T01.prefab ... T17.prefab
@@ -121,7 +121,7 @@ XMflight/
 │   └── packages-lock.json
 ├── ProjectSettings/
 ├── README.md
-└── xmflight通信与仿真流程图.png
+└── xmflight_sim_flow.png
 ```
 
 ---
@@ -200,80 +200,100 @@ Assets/Scenes/Forest.unity
 
 ## 7. 参数配置
 
-主要运行参数集中在 `Assets/Config/XMFlightConfig.asset`，对应类型定义在 `XMConfig.cs`。
+主要运行参数集中在 `Assets/Config/XMFlightConfig.asset`，对应类型定义在 `XMConfig.cs`。状态发布步长 `_publishStride` 和诊断开关 `_enableDiagnostics` 直接配置在场景中的 `XMSimulationManager` 组件上。
 
+```text
+在 Assets/Config 文件夹下右键 → Create → XMflight → Config，生成 .asset 文件。
 ```
-Assets/Config文件夹下右键─>Creat─>XMflight─>Config生成*.asset 文件
-```
-
-
 
 ### 7.1 通信参数
 
 | 参数 | 默认值 | 说明 |
 |---|---:|---|
-| `commandPort` | `10253` | 控制指令订阅端口 |
-| `statePort` | `10254` | 状态帧发布端口 |
-| `depthPort` | `11254` | 深度帧发布端口 |
-| `publishStride` | `1` | 状态发布步长；状态频率 = 物理频率 / stride |
-| `zmqHighWatermark` | `1` | ZMQ 高水位队列长度 |
-| `depthQueueCapacity` | `2` | 深度帧发送队列容量 |
+| `commandSubPort` | `10253` | 控制指令订阅端口 |
+| `statePubPort` | `10254` | 状态帧发布端口 |
+| `depthPubPort` | `11254` | 深度帧发布端口 |
+| `recvHighWatermark` | `2` | 接收端 ZMQ 高水位 |
+| `sendHighWatermark` | `2` | 发送端 ZMQ 高水位 |
+| `_publishStride` | `1` | `XMSimulationManager` 字段；状态频率 = 物理频率 / stride |
 
 ### 7.2 运动学参数
 
 | 参数 | 默认值 | 单位 | 说明 |
 |---|---:|---|---|
 | `fixedDeltaTime` | `0.02` | s | Unity 物理步长 |
+| `simulationSpeed` | `1.0` | - | `Time.timeScale` |
 | `maxSpeed` | `5.0` | m/s | 速度指令幅值上限 |
 | `timeConstantXY` | `0.06` | s | 水平速度一阶响应时间常数 |
 | `timeConstantZ` | `0.06` | s | 垂直速度一阶响应时间常数 |
+| `obsNoiseStdDev` | `0` | - | 速度和加速度观测噪声标准差 |
+| `posNoiseStdDev` | `0` | m | 位置观测噪声标准差 |
 | `accFilterTime` | `0.15` | s | 加速度估计滤波时间常数 |
 | `maxTiltAngleDeg` | `15` | deg | 姿态可视化最大倾角 |
 | `maxAngularRateDeg` | `120` | deg/s | 姿态可视化最大角速度 |
+| `attitudeFilterTime` | `0.30` | s | 姿态可视化滤波时间常数 |
+| `maxTiltRateDeg` | `70` | deg/s | 倾角变化率上限 |
 | `visualTiltScale` | `0.65` | - | 视觉倾角缩放 |
 | `ctrlLatencyFrames` | `0` | frame | 控制延迟帧数 |
+| `stepPosKp` | `3.0` | s⁻¹ | Step/Trajectory 位置误差比例增益 |
+| `stepPosErrClamp` | `1.0` | m | 位置误差修正上限 |
+| `zeroCommandOnTimeout` | `true` | - | 指令超时后将目标速度清零 |
+| `commandTimeoutSec` | `0.25` | s | 指令超时阈值，使用实时时钟 |
+| `minFlightHeight` | `1.0` | m | 最低飞行高度 |
+| `maxFlightHeight` | `3.0` | m | 最高飞行高度 |
 
 ### 7.3 碰撞检测参数
 
 | 参数 | 默认值 | 单位 | 说明 |
 |---|---:|---|---|
-| `bodyRadius` | `0.5` | m | 无人机近似碰撞半径 |
-| `frontRayDistance` | `4.0` | m | 前向射线检测距离 |
-| `frontConeAngleDeg` | `60` | deg | 前向锥形检测角 |
-| `frontRayCount` | `1024` | 条 | 前向射线数量 |
-| `sphereRayCount` | `512` | 条 | 全局球面射线数量 |
-| `frontRayRatio` | `0.65` | - | 前向射线比例目标 |
-| `clearanceWarningDistance` | `1.2` | m | 安全距离预警阈值 |
-| `nearCollisionDistance` | `0.65` | m | 近碰撞阈值 |
-| `lowRiskRayCount` | `384` | 条 | 低风险射线数 |
-| `mediumRiskRayCount` | `768` | 条 | 中风险射线数 |
-| `maxRiskRayCount` | `1536` | 条 | 高风险射线数 |
+| `droneRadius` | `0.2` | m | 无人机近似碰撞半径 |
+| `collisionRayMaxRange` | `5.0` | m | 射线最大检测距离 |
+| `obstacleMask` | Layer 3 | - | `Obstacle` 障碍物层 |
+| `maxRayCount` | `1536` | 条 | 高风险射线数 |
+| `mediumRayCount` | `768` | 条 | 中风险射线数 |
+| `lowRayCount` | `384` | 条 | 低风险射线数 |
+| `frontRayRatio` | `0.65` | - | 前向锥形射线占比 |
+| `frontConeHalfAngleDeg` | `40` | deg | 前向锥半角 |
+| `highRiskClearance` | `0.8` | m | 高风险安全距离阈值 |
+| `mediumRiskClearance` | `2.0` | m | 中风险安全距离阈值 |
+| `highRiskSpeed` | `2.2` | m/s | 高风险速度阈值 |
+| `mediumRiskSpeed` | `1.2` | m/s | 中风险速度阈值 |
+| `highRiskInterval` | `1` | FixedUpdate | 高风险检测间隔 |
+| `mediumRiskInterval` | `2` | FixedUpdate | 中风险检测间隔 |
+| `lowRiskInterval` | `5` | FixedUpdate | 低风险检测间隔 |
 
 ### 7.4 深度相机参数
 
 | 参数 | 默认值 | 单位 | 说明 |
 |---|---:|---|---|
-| `pixelWidth` | `640` | pixel | 深度图宽度 |
-| `pixelHeight` | `480` | pixel | 深度图高度 |
-| `minDepth` | `0.1` | m | 最小深度 |
-| `maxDepth` | `20.0` | m | 最大深度 |
-| `d435HFovDeg` | `86.0` | deg | 水平视场角 |
-| `d435VFovDeg` | `57.0` | deg | 垂直视场角 |
-| `useAsyncGPUReadback` | `true` | - | 是否使用异步 GPU 读回 |
-| `forceSyncReadback` | `false` | - | 是否强制同步读回 |
-| `noDepthValueMm` | `0` | mm | 无深度像素值 |
+| `outputWidth` | `848` | pixel | 深度图宽度 |
+| `outputHeight` | `480` | pixel | 深度图高度 |
+| `minDepthRange` | `0.3` | m | 最小有效深度 |
+| `maxDepthRange` | `6.0` | m | 最大有效深度 |
+| `targetHFovDeg` | `87.0` | deg | 水平视场角 |
+| `targetVFovDeg` | `58.0` | deg | 垂直视场角 |
+| `cameraOffset` | `(0,0,0)` | m | 相机相对无人机中心的位置 |
+| `cameraEuler` | `(0,0,0)` | deg | 相机相对无人机中心的欧拉角 |
+| `showDepthInGameView` | `true` | - | 在 Game 视图显示深度图 |
+| `enableDepthNoise` | `false` | - | 是否启用深度噪声 |
+| `baseDepthNoiseStd` | `0.002` | m | 基础深度噪声标准差 |
+| `depthNoiseQuadraticK` | `0.0015` | - | 距离平方噪声系数 |
+| `randomDropoutProb` | `0` | - | 深度像素随机丢失概率 |
+
+当前实现固定使用 `AsyncGPUReadback`。无效、超量程、NaN 或无穷深度统一编码为 `0 mm`。
 
 ---
 
 ## 8. 运行模式
 
-控制指令包含 3 种模式。
+控制指令包含 4 种模式。
 
 | 模式 | 名称 | 功能 |
 |---:|---|---|
 | 0 | `Velocity` | 速度控制；外部客户端发送期望速度 |
 | 1 | `Teleport` | 位置重置；用于 episode reset 或指定初始位姿 |
-| 2 | `Step` | 速度控制 + 目标位置修正；用于离散交互或训练步进 |
+| 2 | `Step` | 速度控制 + 目标位置修正 |
+| 3 | `Trajectory` | 当前复用 `Step` 的处理逻辑，并非轨迹点数组输入 |
 
 ---
 
@@ -321,6 +341,7 @@ Unity 使用左手坐标系，ROS 常用坐标系以 `x` 前、`y` 左、`z` 上
 | ROS 位置 → Unity 位置 | `[x, y, z] → [-y, z, x]` |
 | Unity 位置 → ROS 位置 | `[x, y, z] → [z, -x, y]` |
 | ROS 机体系速度 → Unity 机体系速度 | `[vx, vy, vz] → [-vy, vz, vx]` |
+| Unity 四元数 → ROS 四元数 | `[qx, qy, qz, qw] → [qz, -qx, qy, -qw]` |
 
 控制端和评估端必须使用同一坐标转换规则，否则会产生方向符号错误。
 
@@ -343,11 +364,13 @@ Unity 使用左手坐标系，ROS 常用坐标系以 `x` 前、`y` 左、`z` 上
 | 序号 | 字段 | 类型 | 说明 |
 |---:|---|---|---|
 | 0 | `SchemaVersion` | int | 协议版本 |
-| 1 | `Mode` | int | 控制模式：0/1/2 |
-| 2 | `Seq` | long | 指令序号 |
-| 3 | `Velocity` | float[3] | 速度指令 |
-| 4 | `Position` | float[3] | 目标位置或重置位置 |
-| 5 | `YawDeg` | float | 偏航角，单位 deg |
+| 1 | `Mode` | int | 控制模式：0/1/2/3 |
+| 2 | `Action` | float[4] | `[vx, vy, vz, yaw_rate]`；速度为 ROS 机体系，偏航角速度为 rad/s |
+| 3 | `Position` | float[3] 或 null | ROS 世界坐标系目标位置或重置位置 |
+| 4 | `ClientTimeNs` | long | 客户端时间戳，单位 ns；当前仅解析，未参与控制 |
+| 5 | `CommandId` | long | 指令编号；当前仅解析，未进行单调性检查 |
+
+所有模式的 `Action` 长度必须至少为 4。Teleport 模式使用 `Position` 重置位置，并使用 `Action[3]` 作为偏航角，单位为 rad。
 
 ### 11.3 状态帧
 
@@ -356,14 +379,14 @@ Unity 使用左手坐标系，ROS 常用坐标系以 `x` 前、`y` 左、`z` 上
 | 序号 | 字段 | 类型 | 说明 |
 |---:|---|---|---|
 | 0 | `SchemaVersion` | int | 协议版本 |
-| 1 | `Seq` | long | 状态帧序号 |
+| 1 | `StateId` | long | 状态帧序号 |
 | 2 | `SimTimeNs` | long | 仿真时间戳，单位 ns |
-| 3 | `Position` | float[3] | 无人机位置 |
-| 4 | `Rotation` | float[4] | 无人机四元数 |
-| 5 | `Velocity` | float[3] | 当前速度 |
-| 6 | `Acceleration` | float[3] | 当前加速度估计 |
-| 7 | `MinClearance` | float | 最小安全距离 |
-| 8 | `Flags` | int | 碰撞/状态标志位 |
+| 3 | `Flags` | int | bit 0：碰撞；bit 1：高度越界 |
+| 4 | `MinClearance` | float | 最小安全距离，单位 m |
+| 5 | `CurrPos` | float[3] | ROS 世界坐标系无人机位置 |
+| 6 | `CurrRot` | float[4] | ROS 坐标系四元数 `[qx,qy,qz,qw]` |
+| 7 | `CurrVel` | float[3] | ROS 世界坐标系当前速度 |
+| 8 | `CurrAcc` | float[3] | ROS 世界坐标系当前加速度估计 |
 | 9 | `FrontClearances` | float[3] | 左/中/右前向安全距离 |
 
 状态频率计算：
@@ -405,27 +428,41 @@ state_rate = 1 / 0.02 / 1 = 50 Hz
 | 11 | `MinClearance` | 最小安全距离 |
 | 12 | `FrontClearances` | 左/中/右前向安全距离 |
 
+`Camera` 为 8 个 float：
+
+```text
+[fx, fy, cx, cy, width, height, min_depth, max_depth]
+```
+
+`DepthMeta` 为 5 个 int：
+
+```text
+[width, height, encoding, row_stride_bytes, byte_order]
+```
+
+默认值中，`encoding=1` 表示 `16UC1`，`row_stride_bytes=1696`，`byte_order=0` 表示小端序。
+
 深度 payload 大小：
 
 ```text
 payload_bytes = width × height × 2
-              = 640 × 480 × 2
-              = 614400 bytes/frame
+              = 848 × 480 × 2
+              = 814080 bytes/frame
 ```
 
 深度 payload 带宽估计：
 
 ```text
-depth_payload_bandwidth = 614400 × depth_fps bytes/s
+depth_payload_bandwidth = 814080 × depth_fps bytes/s
 ```
 
 当深度帧率为 50 Hz：
 
 ```text
-614400 × 50 = 30,720,000 bytes/s ≈ 29.30 MiB/s
+814080 × 50 = 40,704,000 bytes/s ≈ 38.82 MiB/s
 ```
 
-该估计不包含 MessagePack 元数据和 ZMQ multipart 帧头开销。元数据相对于 614400 bytes 的深度 payload 占比较小，但严格评估网络负载时应计入。
+该估计不包含 MessagePack 元数据和 ZMQ multipart 帧头开销。元数据相对于 814080 bytes 的深度 payload 占比较小，但严格评估网络负载时应计入。
 
 ### 11.5 状态频率与深度频率差异
 
@@ -473,13 +510,20 @@ depth_sub.setsockopt(zmq.SUBSCRIBE, b"")
 time.sleep(0.5)
 
 schema_version = 2
-seq = 1
 mode = 0
-velocity = [0.0, 0.0, 1.0]
-position = [0.0, 1.0, 0.0]
-yaw_deg = 0.0
+action = [0.0, 0.0, 1.0, 0.0]
+position = None
+client_time_ns = time.time_ns()
+command_id = 1
 
-cmd = [schema_version, mode, seq, velocity, position, yaw_deg]
+cmd = [
+    schema_version,
+    mode,
+    action,
+    position,
+    client_time_ns,
+    command_id,
+]
 cmd_pub.send(msgpack.packb(cmd, use_bin_type=True))
 
 poller = zmq.Poller()
@@ -546,7 +590,7 @@ while True:
 /home/xm/XM/xm_ws/src/planning/data/map_data
 ```
 
-若在其他机器、Windows 路径或容器环境中运行，应将该路径改为自己路径
+`ForestGenerator` 的 `_pointCloudOutputDirectory` 可在 Inspector 中修改；`ScannerGPU.StartScan()` 中的输出目录当前直接写在源码中。若在其他机器、Windows 或容器环境中运行，需要分别检查这两个位置。
 
 | 推荐方式 | 原因 |
 |---|---|
@@ -568,18 +612,18 @@ while True:
 默认深度 payload：
 
 ```text
-640 × 480 × 2 = 614400 bytes/frame
+848 × 480 × 2 = 814080 bytes/frame
 ```
 
 不同深度帧率下的原始 payload 带宽：
 
 | 深度帧率 | payload 带宽 |
 |---:|---:|
-| 10 Hz | 5.86 MiB/s |
-| 20 Hz | 11.72 MiB/s |
-| 30 Hz | 17.58 MiB/s |
-| 50 Hz | 29.30 MiB/s |
-| 60 Hz | 35.16 MiB/s |
+| 10 Hz | 7.76 MiB/s |
+| 20 Hz | 15.53 MiB/s |
+| 30 Hz | 23.29 MiB/s |
+| 50 Hz | 38.82 MiB/s |
+| 60 Hz | 46.58 MiB/s |
 
 实际带宽高于表中数值，原因是还包含：
 
@@ -608,8 +652,10 @@ while True:
 |---|---|---|---|
 | 高 | `XMCollisionSensor.BuildBiasedSphere()` / `UpdateRayClearance()` | 低风险射线模式可能导致前向专用射线数量为 0 | 调整射线数组生成顺序，保证前向射线优先保留 |
 | 中 | `ScannerGPU.ProcessBatchSafe()` | 点云导出峰值内存较高 | 降低批大小或采用流式写入 |
-| 中 | `ForestGenerator.cs` / `ScannerGPU.cs` | 地图输出路径硬编码 | 改为配置项、命令行参数或环境变量 |
+| 中 | `ForestGenerator.cs` / `ScannerGPU.cs` | 默认地图输出路径依赖本机 Linux 目录；`ScannerGPU` 路径直接写在源码中 | 统一改为配置项、命令行参数或环境变量 |
 | 中 | `MessagePack.asmdef` | 引用 DLL 与工程实际插件可能不完全一致 | 在 Unity Editor 中执行完整编译验证 |
+| 中 | `XMSimulationManager.HandleStep()` | Mode 2/3 不会暂停仿真、等待动作或精确推进固定物理步数 | 若用于同步强化学习环境，增加 step 请求、固定步推进和 ACK |
+| 中 | `ControlCommandMsg` | `client_time_ns` 和 `command_id` 当前仅解析，未用于去重、乱序检查或应答 | 增加指令时序检查和执行结果应答 |
 | 低 | `Spin.cs` | namespace 为 `XMFlight`，其他脚本多为 `XMflight` | 统一命名空间大小写 |
 | 低 | `XMConfig.cs` | `isRlTrainingMode` 定义后未发现有效读取 | 删除冗余字段或补全使用逻辑 |
 | 低 | `XMSimulationManager.cs` | `_prevVelocity` 赋值但未参与核心计算 | 删除冗余变量或接入状态估计流程 |
@@ -628,13 +674,13 @@ while True:
 | 3 | ZMQ 端口 | `10253/10254/11254` 可绑定或连接 |
 | 4 | 控制指令 | Mode 0 速度指令可改变无人机位姿 |
 | 5 | Teleport | Mode 1 可重置无人机位置 |
-| 6 | Step | Mode 2 可执行单步控制和目标修正 |
+| 6 | Step | Mode 2 可执行速度控制和位置目标修正；不将其视为同步单步仿真 |
 | 7 | 状态帧 | 客户端可稳定接收 `10254` 状态帧 |
-| 8 | 深度帧 | 客户端可接收 multipart，payload 长度为 614400 bytes |
+| 8 | 深度帧 | 客户端可接收 multipart，payload 长度为 814080 bytes |
 | 9 | 碰撞检测 | 接近树木时 `MinClearance` 下降，碰撞标志有效 |
 | 10 | 坐标转换 | ROS 与 Unity 端位置、速度方向一致 |
 | 11 | 性能 | 目标帧率、CPU、GPU、内存占用满足实验需求 |
-| 12 | 日志 | reset、通信异常、深度队列溢出可定位 |
+| 12 | 日志 | reset、指令解析错误、状态/深度发送异常可定位 |
 
 ---
 
@@ -644,7 +690,7 @@ while True:
 |---|---|---|
 | 森林环境局部避障 | 高 | 场景包含 4000 个树木碰撞体 |
 | 深度图感知算法验证 | 高 | 输出 16UC1 深度 payload 和相机内参 |
-| 强化学习环境交互 | 高 | 支持 reset、step、状态和深度观测 |
+| 强化学习仿真后端 | 中 | 支持 reset、控制、状态和深度观测；reward、done、goal、episode_id、同步 step/ACK 需由外部环境封装 |
 | 路径规划闭环验证 | 高 | 支持外部客户端连续速度控制 |
 | 真实飞控低层控制验证 | 低 | 当前运动模型不是刚体动力学模型 |
 | 电机/姿态控制研究 | 低 | 未建模电机、桨叶、推力矩和气动效应 |
@@ -655,10 +701,10 @@ while True:
 
 | 方向 | 改进项 | 预期收益 |
 |---|---|---|
-| 协议稳定性 | 为 MessagePack 协议增加显式版本兼容检查 | 降低客户端升级风险 |
+| 协议稳定性 | 在现有版本拒绝机制上增加版本迁移策略和错误应答 | 降低客户端升级风险 |
 | 数据同步 | 状态帧和深度帧使用统一采样时间戳机制 | 便于传感器融合和训练数据对齐 |
-| 性能优化 | 深度帧支持降采样、压缩或共享内存 | 降低 29.30 MiB/s 级别网络负载 |
-| 可复现性 | 固定森林随机种子并导出场景配置 | 保证实验可重复 |
+| 性能优化 | 深度帧支持降采样、压缩或共享内存 | 降低默认 38.82 MiB/s 原始 payload 负载 |
+| 可复现性 | 保存每次实验的 seed、地图模式和生成参数 | 保证实验可重复并支持多地图对照 |
 | 工程部署 | 去除硬编码路径，增加配置文件和命令行参数 | 便于多机器部署 |
 | 单元测试 | 增加坐标转换、协议编解码、状态更新测试 | 降低维护成本 |
 | 文档完善 | 增加 ROS 客户端接口文档和数据录制说明 | 便于算法侧接入 |
@@ -674,7 +720,7 @@ while True:
 | 仿真平台 | Unity `2022.3.62f2c1` |
 | 场景规模 | 森林场景含 4000 个树木实例和 4000 个 MeshCollider |
 | 状态频率 | 默认 `50 Hz`，由 `FixedUpdate` 和 `publishStride` 决定 |
-| 深度数据 | `640 × 480`、`16UC1`，频率由渲染帧率和 GPU 读回决定 |
+| 深度数据 | `848 × 480`、`16UC1`、有效范围 `0.3–6.0 m`，频率由渲染帧率和 GPU 读回决定 |
 
 ---
 
@@ -684,6 +730,6 @@ while True:
 |---|---|
 | Unity Editor 编译 | 未在当前环境执行 |
 | PlayMode 仿真 | 未在当前环境执行 |
-| 外部 ROS 客户端 | 当前压缩包未包含 |
+| 外部 ROS 客户端 | 当前仓库未包含 |
 | Python 最小示例 | README 内给出接口级示例，未作为独立测试脚本运行 |
 | 数据统计来源 | 当前工程文件静态读取 |
