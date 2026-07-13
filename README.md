@@ -51,7 +51,7 @@ XMflight 是基于 Unity 的无人机森林环境仿真工程，面向路径规�
 
 ### 3.1 通信与仿真流程
 
-<img src="/home/xm/XM/XMflight/XMflight_sim_flow.png" alt="XMflight" style="zoom:50%;" />
+<img src="./XMflight_sim_flow.png" alt="XMflight" style="zoom:50%;" />
 
 图中包含 3 条关键链路：
 
