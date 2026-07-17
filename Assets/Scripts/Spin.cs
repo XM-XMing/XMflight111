@@ -1,7 +1,7 @@
 // filename: Assets/Scripts/Spin.cs
 using UnityEngine;
 
-namespace XMFlight
+namespace XMflight
 {
     public class Spin : MonoBehaviour {
         [Header("Settings")]
