@@ -18,7 +18,7 @@ namespace XMflight
         [Serializable]
         private sealed class SquareSettings {
             [Min(0.01f)] public float mapSize = 200f;
-            [Min(0)] public int treeCount = 4000;
+            [Min(0)] public int treeCount = 2500;
             [Min(0f)] public float centerClearRadius = 2.5f;
         }
 
