@@ -66,6 +66,12 @@ namespace XMflight
             public Vector3 stepTargetPosWorld;
         }
 
+        private sealed class BufferedPrimitiveExecution {
+            public long executionId;
+            public PrimitiveExecutionFrameMsg[] frames;
+            public int nextFrameIndex;
+        }
+
         private bool _hasPendingStepTarget;
         private Vector3 _pendingStepTargetWorld;
 
@@ -91,6 +97,13 @@ namespace XMflight
         private float _smoothPitchDeg;
         private float _smoothRollDeg;
         private bool _frozen;
+        private bool _deterministicExecutionMode;
+        private bool _completeExecutionAfterPublish;
+        private BufferedPrimitiveExecution _activeExecution;
+        private long _appliedExecutionId = -1;
+        private int _appliedExecutionFrameIndex = -1;
+        private long _appliedCommandId = -1;
+        private int _executionStatus = XMProtocol.ExecutionStatusNone;
 
         private readonly System.Collections.Generic.Queue<DelayedCmd> _cmdQueue = new System.Collections.Generic.Queue<DelayedCmd>(16);
 
@@ -297,6 +310,7 @@ namespace XMflight
         private void FixedUpdate() {
             if (!_running) return;
 
+            ClearExecutionAcknowledgement();
             PollCommands();
 
             if (_col != null)
@@ -319,12 +333,22 @@ namespace XMflight
                 _collisionLatchTimer -= Time.fixedDeltaTime;
             }
 
-            ApplyCommandTimeoutBrake();
+            if (_activeExecution != null)
+                ApplyNextPrimitiveExecutionFrame();
 
-            if (!_frozen)
+            if (!_deterministicExecutionMode)
+                ApplyCommandTimeoutBrake();
+
+            bool integrationDue = !_deterministicExecutionMode || _activeExecution != null;
+            if (!_frozen && integrationDue)
                 StepDynamics();
 
             PublishDynamicsState();
+
+            if (_completeExecutionAfterPublish) {
+                _activeExecution = null;
+                _completeExecutionAfterPublish = false;
+            }
         }
 
         private void InitZMQ() {
@@ -367,21 +391,28 @@ namespace XMflight
                         );
                     }
 
+                    int mode = AsInt(msg[XMProtocol.CommandIndex.Mode]);
                     cmd = new ControlCommandMsg {
                         schema_version = schema,
-                        mode = AsInt(msg[XMProtocol.CommandIndex.Mode]),
-                        action = AsFloatArray(
-                            msg[XMProtocol.CommandIndex.Action],
-                            4,
-                            "action"
-                        ),
+                        mode = mode,
+                        action = mode == XMProtocol.ModePrimitiveExecution
+                            ? null
+                            : AsFloatArray(msg[XMProtocol.CommandIndex.Action], 4, "action"),
                         position = AsOptionalFloatArray(
                             msg[XMProtocol.CommandIndex.Position],
                             3,
                             "position"
                         ),
                         client_time_ns = AsLong(msg[XMProtocol.CommandIndex.ClientTimeNs]),
-                        command_id = AsLong(msg[XMProtocol.CommandIndex.CommandId])
+                        command_id = AsLong(msg[XMProtocol.CommandIndex.CommandId]),
+                        execution_id = AsLong(msg[XMProtocol.CommandIndex.ExecutionId]),
+                        execution_frame_index = AsInt(msg[XMProtocol.CommandIndex.ExecutionFrameIndex]),
+                        execution_frame_count = AsInt(msg[XMProtocol.CommandIndex.ExecutionFrameCount]),
+                        execution_frames = mode == XMProtocol.ModePrimitiveExecution
+                            ? AsPrimitiveExecutionFrames(
+                                msg[XMProtocol.CommandIndex.ExecutionFrames],
+                                AsInt(msg[XMProtocol.CommandIndex.ExecutionFrameCount]))
+                            : null
                     };
                 }
                 catch (Exception e) {
@@ -407,6 +438,9 @@ namespace XMflight
                 else if (cmd.mode == XMProtocol.ModeTrajectory) {
                     _modeTrajectoryCount++;
                     HandleExternalTrajectory(cmd);
+                }
+                else if (cmd.mode == XMProtocol.ModePrimitiveExecution) {
+                    HandlePrimitiveExecution(cmd);
                 }
                 else {
                     Debug.LogWarning($"[XMflight] Unknown command mode: {cmd.mode}");
@@ -488,9 +522,120 @@ namespace XMflight
             throw new FormatException($"{name} type invalid: {value.GetType()}");
         }
 
+        private static PrimitiveExecutionFrameMsg[] AsPrimitiveExecutionFrames(
+            object value,
+            int expectedCount
+        ) {
+            if (expectedCount <= 0)
+                throw new FormatException($"execution frame count invalid: {expectedCount}");
+            if (!(value is IList frames) || frames.Count != expectedCount)
+                throw new FormatException(
+                    $"execution frames invalid: count={(value is IList l ? l.Count : -1)} expected={expectedCount}"
+                );
+
+            PrimitiveExecutionFrameMsg[] decoded = new PrimitiveExecutionFrameMsg[expectedCount];
+            System.Collections.Generic.HashSet<long> commandIds =
+                new System.Collections.Generic.HashSet<long>();
+            for (int i = 0; i < expectedCount; i++) {
+                if (!(frames[i] is IList frame) || frame.Count != 3)
+                    throw new FormatException($"execution frame {i} must contain index, command_id, action");
+                int frameIndex = AsInt(frame[0]);
+                long commandId = AsLong(frame[1]);
+                if (frameIndex != i)
+                    throw new FormatException($"execution frame order invalid: got={frameIndex} expected={i}");
+                if (!commandIds.Add(commandId))
+                    throw new FormatException($"duplicate execution command_id: {commandId}");
+                decoded[i] = new PrimitiveExecutionFrameMsg {
+                    frame_index = frameIndex,
+                    command_id = commandId,
+                    action = AsFloatArray(frame[2], 4, $"execution frame {i} action")
+                };
+            }
+            return decoded;
+        }
+
+        private void ClearExecutionAcknowledgement() {
+            _appliedExecutionId = -1;
+            _appliedExecutionFrameIndex = -1;
+            _appliedCommandId = -1;
+            _executionStatus = XMProtocol.ExecutionStatusNone;
+        }
+
+        private void DisableDeterministicExecution() {
+            _deterministicExecutionMode = false;
+            _activeExecution = null;
+            _completeExecutionAfterPublish = false;
+            ClearExecutionAcknowledgement();
+        }
+
+        private void HandlePrimitiveExecution(ControlCommandMsg cmd) {
+            if (cmd.execution_id < 0 || cmd.execution_frame_index != -1 ||
+                cmd.execution_frame_count <= 0 || cmd.execution_frames == null ||
+                cmd.execution_frames.Length != cmd.execution_frame_count) {
+                Debug.LogWarning($"[XMflight] Rejecting malformed primitive execution {cmd.execution_id}");
+                return;
+            }
+            if (_ctrlLatencyFrames != 0) {
+                Debug.LogError(
+                    $"[XMflight] Deterministic primitive execution requires ctrlLatencyFrames=0, got {_ctrlLatencyFrames}"
+                );
+                return;
+            }
+            if (_activeExecution != null) {
+                Debug.LogWarning(
+                    $"[XMflight] Rejecting overlapping primitive execution {cmd.execution_id}; " +
+                    $"active={_activeExecution.executionId}"
+                );
+                return;
+            }
+
+            _deterministicExecutionMode = true;
+            _activeExecution = new BufferedPrimitiveExecution {
+                executionId = cmd.execution_id,
+                frames = cmd.execution_frames,
+                nextFrameIndex = 0
+            };
+            _cmdQueue.Clear();
+            _lastExecutedCmd = default;
+            _hasPendingStepTarget = false;
+            _hasReceivedMotionCommand = false;
+            _frozen = false;
+            _collisionLatchTimer = 0f;
+        }
+
+        private void ApplyNextPrimitiveExecutionFrame() {
+            int index = _activeExecution.nextFrameIndex;
+            PrimitiveExecutionFrameMsg frame = _activeExecution.frames[index];
+            ApplyPrimitiveAction(frame.action);
+
+            _appliedExecutionId = _activeExecution.executionId;
+            _appliedExecutionFrameIndex = frame.frame_index;
+            _appliedCommandId = frame.command_id;
+            bool complete = index == _activeExecution.frames.Length - 1;
+            _executionStatus = complete
+                ? XMProtocol.ExecutionStatusComplete
+                : XMProtocol.ExecutionStatusFrameApplied;
+            _activeExecution.nextFrameIndex++;
+            _completeExecutionAfterPublish = complete;
+        }
+
+        private void ApplyPrimitiveAction(float[] action) {
+            Vector3 bodyUnity = XMConverters.RosBodyVelocityToUnityBody(
+                action[0],
+                action[1],
+                action[2]
+            );
+            Quaternion yawRot = Quaternion.Euler(0f, _drone.rotation.eulerAngles.y, 0f);
+            _targetVelWorld = yawRot * bodyUnity;
+            _targetYawRate = -action[3];
+            _hasPendingStepTarget = false;
+        }
+
         private void HandleTeleport(ControlCommandMsg cmd) {
             if (cmd.position == null || cmd.position.Length < 3)
                 return;
+
+            DisableDeterministicExecution();
 
             _drone.position = XMConverters.RosToUnityPos(cmd.position);
 
@@ -539,6 +684,7 @@ namespace XMflight
             if (cmd.action == null || cmd.action.Length < 4)
                 return;
 
+            DisableDeterministicExecution();
             MarkMotionCommandReceived();
 
             if (_frozen) {
@@ -563,6 +709,7 @@ namespace XMflight
             if (cmd.action == null || cmd.action.Length < 4)
                 return;
 
+            DisableDeterministicExecution();
             MarkMotionCommandReceived();
 
             if (_frozen) {
@@ -783,6 +930,11 @@ namespace XMflight
             _stateMsg[XMProtocol.DynamicsStateIndex.CurrVel] = _stateVelRos;
             _stateMsg[XMProtocol.DynamicsStateIndex.CurrAcc] = _stateAccRos;
             _stateMsg[XMProtocol.DynamicsStateIndex.FrontClearances] = _stateFrontClearances;
+            _stateMsg[XMProtocol.DynamicsStateIndex.AppliedExecutionId] = _appliedExecutionId;
+            _stateMsg[XMProtocol.DynamicsStateIndex.AppliedExecutionFrameIndex] =
+                _appliedExecutionFrameIndex;
+            _stateMsg[XMProtocol.DynamicsStateIndex.AppliedCommandId] = _appliedCommandId;
+            _stateMsg[XMProtocol.DynamicsStateIndex.ExecutionStatus] = _executionStatus;
 
             try {
                 byte[] raw = MessagePackSerializer.Serialize(_stateMsg);
