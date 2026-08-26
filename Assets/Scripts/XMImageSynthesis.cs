@@ -44,6 +44,18 @@ namespace XMflight
             public long captureId;
             public float captureTime;
             public long simTimeNs;
+            public long captureTimeNs;
+            public bool hasEndpointObservationBinding;
+            public long endpointStateId;
+            public long endpointPhysicsTimeNs;
+            public string endpointEpisodeId;
+            public string endpointResetId;
+            public string endpointRuntimeInstanceId;
+            // Diagnostic provenance only.  These fields are deliberately not
+            // part of the depth wire payload; they let the runtime audit join
+            // the frame-24 queue operation to the eventual async callback.
+            public long endpointSourceExecutionId;
+            public int endpointSourceFrameIndex;
             public Vector3 pos;
             public Quaternion rot;
             public Vector3 vel;
@@ -55,7 +67,21 @@ namespace XMflight
             public byte[] depth;
         }
 
+        // Diagnostic-only callback.  The simulation manager adds the current
+        // execution/runtime state when it receives this event; this class does
+        // not make any lifecycle decision from it.
+        public sealed class CaptureLifecycleDiagnostic {
+            public string eventName;
+            public long captureId;
+            public CaptureSnapshot snapshot;
+            public long sourceExecutionId;
+            public int sourceFrameIndex;
+            public long endpointStateId;
+            public string detail;
+        }
+
         public Action<CaptureSnapshot> OnFrameReady;
+        public Action<CaptureLifecycleDiagnostic> OnCaptureLifecycleDiagnostic;
         public Func<(Vector3 vel, Vector3 acc, bool col, float clear, float[] front)> OnRequestDynamics;
 
         private Camera _mainCamera;
@@ -70,6 +96,15 @@ namespace XMflight
 
         private readonly Dictionary<long, CaptureSnapshot> _pending = new Dictionary<long, CaptureSnapshot>(16);
         private readonly List<long> _staleKeys = new List<long>(16);
+
+        private bool _hasPendingEndpointBinding;
+        private long _pendingEndpointStateId;
+        private long _pendingEndpointPhysicsTimeNs;
+        private string _pendingEndpointEpisodeId;
+        private string _pendingEndpointResetId;
+        private string _pendingEndpointRuntimeInstanceId;
+        private long _pendingEndpointSourceExecutionId;
+        private int _pendingEndpointSourceFrameIndex;
 
         private bool _alive;
 
@@ -175,6 +210,49 @@ namespace XMflight
             }
         }
 
+        /// <summary>
+        /// Reserve the next rendered depth capture for one explicit physics
+        /// endpoint.  The render timestamp remains independent and is stored
+        /// on the resulting snapshot; no timestamp or arrival-order matching
+        /// is performed by the caller.
+        /// </summary>
+        public long QueueEndpointObservationCapture(
+            long stateId,
+            long physicsTimeNs,
+            string episodeId,
+            string resetId,
+            string runtimeInstanceId,
+            long sourceExecutionId,
+            int sourceFrameIndex
+        ) {
+            if (_hasPendingEndpointBinding)
+                throw new InvalidOperationException(
+                    "an endpoint depth capture is already pending");
+            if (stateId < 0 || physicsTimeNs < 0 ||
+                string.IsNullOrEmpty(episodeId) || string.IsNullOrEmpty(resetId) ||
+                string.IsNullOrEmpty(runtimeInstanceId)) {
+                throw new ArgumentException("endpoint observation identity is incomplete");
+            }
+
+            _hasPendingEndpointBinding = true;
+            _pendingEndpointStateId = stateId;
+            _pendingEndpointPhysicsTimeNs = physicsTimeNs;
+            _pendingEndpointEpisodeId = episodeId;
+            _pendingEndpointResetId = resetId;
+            _pendingEndpointRuntimeInstanceId = runtimeInstanceId;
+            _pendingEndpointSourceExecutionId = sourceExecutionId;
+            _pendingEndpointSourceFrameIndex = sourceFrameIndex;
+            EmitCaptureDiagnostic(
+                "ENDPOINT_CAPTURE_QUEUED",
+                _captureId + 1,
+                null,
+                sourceExecutionId,
+                sourceFrameIndex,
+                stateId,
+                "physics endpoint reserved");
+            return _captureId + 1;
+        }
+
 
         private static Matrix4x4 BuildProjectionFromIntrinsics(
             float fx, float fy, float cx, float cy, int width, int height, float near, float far
@@ -205,6 +283,25 @@ namespace XMflight
             double simTime = Time.timeAsDouble;
             long simTimeNs = (long)(simTime * XMConstants.SecondsToNanoseconds);
 
+            bool hasEndpointBinding = _hasPendingEndpointBinding;
+            long endpointStateId = _pendingEndpointStateId;
+            long endpointPhysicsTimeNs = _pendingEndpointPhysicsTimeNs;
+            string endpointEpisodeId = _pendingEndpointEpisodeId;
+            string endpointResetId = _pendingEndpointResetId;
+            string endpointRuntimeInstanceId = _pendingEndpointRuntimeInstanceId;
+            long endpointSourceExecutionId = _pendingEndpointSourceExecutionId;
+            int endpointSourceFrameIndex = _pendingEndpointSourceFrameIndex;
+            if (hasEndpointBinding) {
+                _hasPendingEndpointBinding = false;
+                _pendingEndpointStateId = -1;
+                _pendingEndpointPhysicsTimeNs = -1;
+                _pendingEndpointEpisodeId = null;
+                _pendingEndpointResetId = null;
+                _pendingEndpointRuntimeInstanceId = null;
+                _pendingEndpointSourceExecutionId = -1;
+                _pendingEndpointSourceFrameIndex = -1;
+            }
+
             var dyn = OnRequestDynamics?.Invoke()
                       ?? (Vector3.zero, Vector3.zero, false, _maxDepthRange,
                           new float[3] { _maxDepthRange, _maxDepthRange, _maxDepthRange });
@@ -213,6 +310,15 @@ namespace XMflight
                 captureId = id,
                 captureTime = (float)simTime,
                 simTimeNs = simTimeNs,
+                captureTimeNs = simTimeNs,
+                hasEndpointObservationBinding = hasEndpointBinding,
+                endpointStateId = endpointStateId,
+                endpointPhysicsTimeNs = endpointPhysicsTimeNs,
+                endpointEpisodeId = endpointEpisodeId,
+                endpointResetId = endpointResetId,
+                endpointRuntimeInstanceId = endpointRuntimeInstanceId,
+                endpointSourceExecutionId = endpointSourceExecutionId,
+                endpointSourceFrameIndex = endpointSourceFrameIndex,
                 pos = _depthCamera.transform.position,
                 rot = _depthCamera.transform.rotation,
                 forward = _depthCamera.transform.forward,
@@ -232,15 +338,63 @@ namespace XMflight
             _depthCamera.RenderWithShader(_uberReplacementShader, "RenderType");
 
             AsyncGPUReadback.Request(_depthRT, 0, TextureFormat.RFloat, req => {
-                if (!_alive) return;
+                if (!_alive) {
+                    EmitCaptureDiagnostic(
+                        "ENDPOINT_CAPTURE_PURGED",
+                        id,
+                        null,
+                        endpointSourceExecutionId,
+                        endpointSourceFrameIndex,
+                        endpointStateId,
+                        "GPU callback after component became inactive");
+                    return;
+                }
 
-                if (req.hasError || !_pending.TryGetValue(id, out CaptureSnapshot frame))
-                {
+                CaptureSnapshot frame;
+                if (req.hasError) {
+                    _pending.TryGetValue(id, out frame);
+                    EmitCaptureDiagnostic(
+                        "GPU_CALLBACK_ERROR",
+                        id,
+                        frame,
+                        frame != null ? frame.endpointSourceExecutionId : endpointSourceExecutionId,
+                        frame != null ? frame.endpointSourceFrameIndex : endpointSourceFrameIndex,
+                        frame != null ? frame.endpointStateId : endpointStateId,
+                        "AsyncGPUReadback.hasError=true");
                     _pending.Remove(id);
                     return;
                 }
 
+                if (!_pending.TryGetValue(id, out frame)) {
+                    EmitCaptureDiagnostic(
+                        "GPU_PENDING_MISS",
+                        id,
+                        null,
+                        endpointSourceExecutionId,
+                        endpointSourceFrameIndex,
+                        endpointStateId,
+                        "capture id absent from pending map");
+                    _pending.Remove(id);
+                    return;
+                }
+
+                EmitCaptureDiagnostic(
+                    "GPU_CALLBACK",
+                    id,
+                    frame,
+                    frame.endpointSourceExecutionId,
+                    frame.endpointSourceFrameIndex,
+                    frame.endpointStateId,
+                    "AsyncGPUReadback callback accepted");
                 frame.depth = ConvertTo16UC1(req.GetData<float>());
+                EmitCaptureDiagnostic(
+                    "ENDPOINT_FRAME_READY",
+                    id,
+                    frame,
+                    frame.endpointSourceExecutionId,
+                    frame.endpointSourceFrameIndex,
+                    frame.endpointStateId,
+                    "depth bytes converted");
                 OnFrameReady?.Invoke(frame);
 
                 _pending.Remove(id);
@@ -311,8 +465,47 @@ namespace XMflight
                     _staleKeys.Add(kvp.Key);
             }
 
-            foreach (long k in _staleKeys)
+            foreach (long k in _staleKeys) {
+                CaptureSnapshot stale;
+                _pending.TryGetValue(k, out stale);
+                EmitCaptureDiagnostic(
+                    "ENDPOINT_CAPTURE_PURGED",
+                    k,
+                    stale,
+                    stale != null ? stale.endpointSourceExecutionId : -1L,
+                    stale != null ? stale.endpointSourceFrameIndex : -1,
+                    stale != null ? stale.endpointStateId : -1L,
+                    "stale capture retention purge");
                 _pending.Remove(k);
+            }
+        }
+
+        private void EmitCaptureDiagnostic(
+            string eventName,
+            long captureId,
+            CaptureSnapshot snapshot,
+            long sourceExecutionId,
+            int sourceFrameIndex,
+            long endpointStateId,
+            string detail)
+        {
+            Action<CaptureLifecycleDiagnostic> callback = OnCaptureLifecycleDiagnostic;
+            if (callback == null) return;
+            try {
+                callback(new CaptureLifecycleDiagnostic {
+                    eventName = eventName,
+                    captureId = captureId,
+                    snapshot = snapshot,
+                    sourceExecutionId = sourceExecutionId,
+                    sourceFrameIndex = sourceFrameIndex,
+                    endpointStateId = endpointStateId,
+                    detail = detail,
+                });
+            }
+            catch (Exception e) {
+                // Diagnostics must never change capture behavior.
+                Debug.LogWarning("[P0-UNITY-LIFECYCLE] diagnostic callback failed: " + e.Message);
+            }
         }
 
         private void ReleaseRT() {
@@ -334,6 +527,16 @@ namespace XMflight
         private void OnDisable() {
             _alive = false;
             ReleaseRT();
+            foreach (KeyValuePair<long, CaptureSnapshot> kvp in _pending) {
+                EmitCaptureDiagnostic(
+                    "ENDPOINT_CAPTURE_PURGED",
+                    kvp.Key,
+                    kvp.Value,
+                    kvp.Value.endpointSourceExecutionId,
+                    kvp.Value.endpointSourceFrameIndex,
+                    kvp.Value.endpointStateId,
+                    "pending capture cleared by OnDisable");
+            }
             _pending.Clear();
 
             if (_vizMat != null) {
@@ -349,6 +552,16 @@ namespace XMflight
         private void OnDestroy() {
             _alive = false;
             ReleaseRT();
+            foreach (KeyValuePair<long, CaptureSnapshot> kvp in _pending) {
+                EmitCaptureDiagnostic(
+                    "ENDPOINT_CAPTURE_PURGED",
+                    kvp.Key,
+                    kvp.Value,
+                    kvp.Value.endpointSourceExecutionId,
+                    kvp.Value.endpointSourceFrameIndex,
+                    kvp.Value.endpointStateId,
+                    "pending capture cleared by OnDestroy");
+            }
             _pending.Clear();
 
             if (_vizMat != null) {
